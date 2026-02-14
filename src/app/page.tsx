@@ -4,25 +4,40 @@ import { useState } from "react";
 import AddressInput from "@/components/AddressInput";
 import ResultsList from "@/components/ResultsList";
 import { Chain, EligibilityResult } from "@/lib/types";
-import { checkEligibility } from "@/lib/eligibility";
 import { CHAIN_LIST } from "@/lib/chains";
 
 export default function Home() {
   const [results, setResults] = useState<EligibilityResult[] | null>(null);
   const [checkedAddress, setCheckedAddress] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   async function handleCheck(address: string, chains: Chain[]) {
     setLoading(true);
     setResults(null);
+    setError("");
 
-    // Simulate network delay for realism
-    await new Promise((resolve) => setTimeout(resolve, 1200));
+    try {
+      const res = await fetch("/api/check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ address, chains }),
+      });
 
-    const eligibilityResults = checkEligibility(address, chains);
-    setResults(eligibilityResults);
-    setCheckedAddress(address);
-    setLoading(false);
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || "Something went wrong");
+        return;
+      }
+
+      setResults(data.results);
+      setCheckedAddress(address);
+    } catch {
+      setError("Failed to connect. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   function handleReset() {
@@ -60,6 +75,10 @@ export default function Home() {
 
       {/* Input */}
       <AddressInput onCheck={handleCheck} loading={loading} />
+
+      {error && (
+        <p className="text-center mt-4 text-red-400 text-sm">{error}</p>
+      )}
 
       {/* Results */}
       {results && results.length > 0 && (
