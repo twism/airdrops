@@ -2,16 +2,14 @@ import { Chain, EligibilityResult, EligibilityStatus } from "./types";
 import { MOCK_AIRDROPS } from "@/data/airdrops";
 import { AIRDROP_CONFIGS } from "./checkers/configs";
 import { checkAirdrop } from "./checkers/registry";
+import { API_AIRDROP_CONFIGS } from "./checkers/api-configs";
+import { checkAirdropApi } from "./checkers/api-checker";
 
 // ---------------------------------------------------------------------------
-// Real eligibility checks (merkle proof + on-chain)
+// Real eligibility checks — Merkle proof + on-chain
 // ---------------------------------------------------------------------------
 
-/**
- * Check eligibility using real protocol integrations.
- * Only checks airdrops that have a registered AirdropConfig.
- */
-export async function checkEligibilityReal(
+export async function checkEligibilityMerkle(
   address: string,
   chains: Chain[]
 ): Promise<EligibilityResult[]> {
@@ -23,7 +21,6 @@ export async function checkEligibilityReal(
     return [];
   }
 
-  // Run all checks in parallel
   const results = await Promise.all(
     relevantConfigs.map((config) => checkAirdrop(address, config))
   );
@@ -32,7 +29,31 @@ export async function checkEligibilityReal(
 }
 
 // ---------------------------------------------------------------------------
-// Mock fallback (used when no real configs are registered for a chain)
+// Real eligibility checks — API-based
+// ---------------------------------------------------------------------------
+
+export async function checkEligibilityApi(
+  address: string,
+  chains: Chain[]
+): Promise<EligibilityResult[]> {
+  const relevantConfigs = API_AIRDROP_CONFIGS.filter((c) =>
+    chains.includes(c.airdrop.chain)
+  );
+
+  if (relevantConfigs.length === 0) {
+    return [];
+  }
+
+  // Run all API checks in parallel
+  const results = await Promise.all(
+    relevantConfigs.map((config) => checkAirdropApi(address, config))
+  );
+
+  return results;
+}
+
+// ---------------------------------------------------------------------------
+// Mock fallback (airdrops without a real integration)
 // ---------------------------------------------------------------------------
 
 function simpleHash(str: string): number {
@@ -68,10 +89,16 @@ export function checkEligibilityMock(
   address: string,
   chains: Chain[]
 ): EligibilityResult[] {
-  // Only mock chains that have NO real configs
-  const realChains = new Set(AIRDROP_CONFIGS.map((c) => c.airdrop.chain));
-  const mockChains = chains.filter((c) => !realChains.has(c));
-  const airdrops = MOCK_AIRDROPS.filter((a) => mockChains.includes(a.chain));
+  // Collect IDs of airdrops that have a real integration (merkle or API)
+  const realIds = new Set([
+    ...AIRDROP_CONFIGS.map((c) => c.airdrop.id),
+    ...API_AIRDROP_CONFIGS.map((c) => c.airdrop.id),
+  ]);
+
+  // Only mock airdrops that don't have a real integration
+  const airdrops = MOCK_AIRDROPS.filter(
+    (a) => chains.includes(a.chain) && !realIds.has(a.id)
+  );
 
   return airdrops.map((airdrop) => {
     const status = getMockStatus(address, airdrop.id);
@@ -84,17 +111,18 @@ export function checkEligibilityMock(
 }
 
 // ---------------------------------------------------------------------------
-// Combined: real + mock fallback
+// Combined: real (merkle + API) + mock fallback
 // ---------------------------------------------------------------------------
 
 export async function checkEligibility(
   address: string,
   chains: Chain[]
 ): Promise<EligibilityResult[]> {
-  const [realResults, mockResults] = await Promise.all([
-    checkEligibilityReal(address, chains),
+  const [merkleResults, apiResults, mockResults] = await Promise.all([
+    checkEligibilityMerkle(address, chains),
+    checkEligibilityApi(address, chains),
     Promise.resolve(checkEligibilityMock(address, chains)),
   ]);
 
-  return [...realResults, ...mockResults];
+  return [...merkleResults, ...apiResults, ...mockResults];
 }
