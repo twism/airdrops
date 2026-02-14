@@ -67,10 +67,19 @@ export async function checkAirdropApi(
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";
+    // Network / RPC errors → don't penalise the user, just skip this check
+    const isNetworkError =
+      msg.includes("timed out") ||
+      msg.includes("fetch") ||
+      msg.includes("ECONNREFUSED") ||
+      msg.includes("ENOTFOUND") ||
+      msg.includes("network");
     return {
       airdrop,
       status: "not_eligible",
-      reason: `Could not verify eligibility: ${msg}`,
+      reason: isNetworkError
+        ? `Could not reach the ${airdrop.chain} RPC to verify eligibility. Try again later.`
+        : `Could not verify eligibility: ${msg}`,
     };
   }
 }
