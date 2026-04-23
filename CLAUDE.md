@@ -20,7 +20,7 @@ There is no test runner configured; ESLint is the only automated quality check.
 ### Data flow
 
 1. User submits a wallet address in `src/app/page.tsx` (client component)
-2. `POST /api/check` (`src/app/api/check/route.ts`) validates input and orchestrates checks
+2. `POST /api/check` (`src/app/api/check/route.ts`) expects `{ address: string, chains: Chain[] }` — returns 400 on invalid address, 500 on parse error
 3. `src/lib/eligibility.ts` runs all three check methods in parallel:
    - **Merkle proof checks** (`checkEligibilityMerkle`) — verifies keccak256 merkle proofs locally via `src/lib/checkers/registry.ts` and `merkle.ts`
    - **API/RPC checks** (`checkEligibilityApi`) — reads live on-chain state via `src/lib/checkers/api-checker.ts` using 30+ protocol configs in `api-configs.ts`
@@ -45,6 +45,36 @@ There is no test runner configured; ESLint is the only automated quality check.
 - **API/RPC-based**: add an `ApiAirdropConfig` object to `src/lib/checkers/api-configs.ts`
 - **Merkle-based**: add an `AirdropConfig` to `src/lib/checkers/configs.ts` following the pattern in `configs.example.ts`
 - **Mock only**: add an entry to `src/data/airdrops.ts`
+
+**`ApiAirdropConfig` shape** (two required fields):
+```ts
+{
+  airdrop: Airdrop,                                    // metadata object
+  check: (address: string) => Promise<ApiCheckResult>  // eligibility logic
+}
+```
+`ApiCheckResult` is a discriminated union — `{ eligible: true; amount?; usdValue?; reason? }` or `{ eligible: false; claimed?: boolean; reason? }`. Use `claimed: true` to distinguish already-claimed from never-eligible. All `check` functions have a 15-second timeout enforced by `apiFetch()` in `api-checker.ts`.
+
+**`AirdropConfig` / `MerkleEntry` shape** for merkle-based airdrops:
+```ts
+{
+  contractAddress: Hex,
+  fetchMerkleData: (address: string) => Promise<MerkleEntry | null>
+}
+// MerkleEntry: { index: number; amount: string; proof: Hex[] }
+```
+`fetchMerkleData` is typically a `fetch` to a GitHub/IPFS JSON file — use `next: { revalidate: 3600 }` for hourly caching and lowercase the address before lookup.
+
+### Address detection
+
+Validation order in `src/lib/address.ts` matters: **Sui is checked before EVM** because both begin with `0x`. Patterns:
+- EVM: `0x[a-fA-F0-9]{40}`
+- Sui: `0x[a-fA-F0-9]{64}`
+- Solana: base58, 32–44 chars
+
+### EligibilityStatus values
+
+`src/lib/types.ts` defines three exact string literals: `"eligible"` | `"not_eligible"` | `"already_claimed"`.
 
 ### Environment variables
 
